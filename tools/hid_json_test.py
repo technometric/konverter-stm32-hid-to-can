@@ -1,13 +1,17 @@
 import argparse
 import json
-import math
 import time
 
 VID = 0x0483
 PID = 0x5750
-REPORT_SIZE = 64
-PAYLOAD_SIZE = 59
-REPORT_TYPE_JSON = 0x01
+REPORT_SIZE = 2
+
+OUT_START = 0x10
+OUT_DATA = 0x11
+OUT_END = 0x12
+IN_START = 0x20
+IN_DATA = 0x21
+IN_END = 0x22
 
 
 def open_device():
@@ -22,50 +26,56 @@ def open_device():
     return dev
 
 
+def write_report(dev, cmd, value):
+    dev.write(bytes([0, cmd & 0xFF, value & 0xFF]))
+    time.sleep(0.002)
+
+
 def write_json(dev, message):
     raw = json.dumps(message, separators=(",", ":")).encode("utf-8")
     seq = int(message.get("seq", 1)) & 0xFF
-    total = max(1, math.ceil(len(raw) / PAYLOAD_SIZE))
 
-    for index in range(total):
-        chunk = raw[index * PAYLOAD_SIZE:(index + 1) * PAYLOAD_SIZE]
-        report = bytearray(REPORT_SIZE)
-        report[0] = REPORT_TYPE_JSON
-        report[1] = seq
-        report[2] = index
-        report[3] = total
-        report[4] = len(chunk)
-        report[5:5 + len(chunk)] = chunk
-
-        # hidapi on Windows expects report ID byte first. Device has no report ID, so use 0.
-        dev.write(bytes([0]) + bytes(report))
-        time.sleep(0.01)
+    write_report(dev, OUT_START, seq)
+    for byte in raw:
+        write_report(dev, OUT_DATA, byte)
+    write_report(dev, OUT_END, 0)
 
 
-def read_json(dev, timeout_ms=2000):
+def normalize_report(report):
+    if not report:
+        return None
+    if len(report) >= 3 and report[0] == 0 and report[1] in (IN_START, IN_DATA, IN_END):
+        return report[1], report[2]
+    if len(report) >= 2:
+        return report[0], report[1]
+    return None
+
+
+def read_json(dev, timeout_ms=5000, debug=False):
     deadline = time.time() + timeout_ms / 1000
-    chunks = {}
-    total = None
+    started = False
     seq = None
+    data = bytearray()
 
     while time.time() < deadline:
-        data = dev.read(REPORT_SIZE, timeout_ms=100)
-        if not data:
+        report = dev.read(64, timeout_ms=100)
+        if not report:
             continue
-        if len(data) < REPORT_SIZE:
-            data = data + [0] * (REPORT_SIZE - len(data))
-        if data[0] != REPORT_TYPE_JSON:
+        if debug:
+            print("RAW:", report[:8])
+
+        normalized = normalize_report(report)
+        if normalized is None:
             continue
-
-        seq = data[1]
-        index = data[2]
-        total = data[3]
-        length = data[4]
-        chunks[index] = bytes(data[5:5 + length])
-
-        if total and len(chunks) >= total:
-            raw = b"".join(chunks[i] for i in range(total))
-            return seq, json.loads(raw.decode("utf-8"))
+        cmd, value = normalized
+        if cmd == IN_START:
+            started = True
+            seq = value
+            data.clear()
+        elif cmd == IN_DATA and started:
+            data.append(value)
+        elif cmd == IN_END and started:
+            return seq, json.loads(data.decode("utf-8"))
 
     raise TimeoutError("Timeout menunggu response HID")
 
@@ -77,6 +87,7 @@ def main():
     parser.add_argument("--sensor", default="flow", choices=["flow", "steam", "ph", "kwh", "turbidity", "pt100"])
     parser.add_argument("--ch", type=int, default=1)
     parser.add_argument("--seq", type=int, default=1)
+    parser.add_argument("--debug", action="store_true")
     args = parser.parse_args()
 
     message = {"seq": args.seq, "cmd": args.cmd}
@@ -91,7 +102,7 @@ def main():
     try:
         print("TX:", json.dumps(message))
         write_json(dev, message)
-        _, response = read_json(dev)
+        _, response = read_json(dev, debug=args.debug)
         print("RX:", json.dumps(response, indent=2))
     finally:
         dev.close()
