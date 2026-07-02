@@ -9,29 +9,26 @@ extern "C" USBD_HandleTypeDef hUSBD_Device_CustomHID;
 
 namespace {
 
-constexpr uint8_t OUT_START = 0x10;
-constexpr uint8_t OUT_DATA = 0x11;
-constexpr uint8_t OUT_END = 0x12;
-constexpr uint8_t IN_START = 0x20;
-constexpr uint8_t IN_DATA = 0x21;
-constexpr uint8_t IN_END = 0x22;
+constexpr uint8_t REPORT_TYPE_JSON = 0x01;
 constexpr size_t JSON_BUFFER_SIZE = 640;
 constexpr uint16_t LED_PULSE_MS = 80;
+constexpr uint16_t TX_SPACING_MS = 2;
 
 volatile bool rxReportAvailable = false;
-volatile uint8_t rxReport0 = 0;
-volatile uint8_t rxReport1 = 0;
+uint8_t rxReport[CUSTOM_HID_REPORT_SIZE] = {};
 
 char rxJson[JSON_BUFFER_SIZE] = {};
 size_t rxJsonLen = 0;
 uint8_t activeSeq = 0;
-bool rxStreaming = false;
+uint8_t expectedChunks = 0;
+uint8_t receivedChunks = 0;
 
 char txJson[JSON_BUFFER_SIZE] = {};
 size_t txJsonLen = 0;
 size_t txJsonOffset = 0;
 uint8_t txSeq = 0;
-uint8_t txPhase = 0;
+uint8_t txChunkIndex = 0;
+uint8_t txTotalChunks = 0;
 bool txPending = false;
 
 uint32_t rxPulseUntil = 0;
@@ -41,13 +38,9 @@ uint32_t nextTxAllowedMs = 0;
 int findJsonInt(const char *json, const char *key, int fallback)
 {
   const char *pos = strstr(json, key);
-  if (pos == nullptr) {
-    return fallback;
-  }
+  if (pos == nullptr) return fallback;
   pos = strchr(pos, ':');
-  if (pos == nullptr) {
-    return fallback;
-  }
+  if (pos == nullptr) return fallback;
   return atoi(pos + 1);
 }
 
@@ -83,25 +76,23 @@ int32_t dummyValueScaled(uint8_t node, const char *sensor, uint8_t channel, uint
   return static_cast<int32_t>(dummyValue(node, sensor, channel) * scale + 0.5f);
 }
 
-void appendScaled(char *buffer, size_t bufferSize, size_t &offset, int32_t scaled, uint16_t scale, uint8_t decimals)
+void appendScaled(char *buffer, size_t bufferSize, size_t &offset, int32_t scaled, uint16_t scale)
 {
   const int32_t whole = scaled / scale;
   const int32_t fraction = scaled % scale;
   offset += snprintf(buffer + offset, bufferSize - offset, "%ld.", static_cast<long>(whole));
   int32_t divisor = scale / 10;
   while (divisor > 1) {
-    if (fraction < divisor) {
-      offset += snprintf(buffer + offset, bufferSize - offset, "0");
-    }
+    if (fraction < divisor) offset += snprintf(buffer + offset, bufferSize - offset, "0");
     divisor /= 10;
   }
   offset += snprintf(buffer + offset, bufferSize - offset, "%ld", static_cast<long>(fraction));
 }
 
-void scaledToText(char *buffer, size_t bufferSize, int32_t scaled, uint16_t scale, uint8_t decimals)
+void scaledToText(char *buffer, size_t bufferSize, int32_t scaled, uint16_t scale)
 {
   size_t offset = 0;
-  appendScaled(buffer, bufferSize, offset, scaled, scale, decimals);
+  appendScaled(buffer, bufferSize, offset, scaled, scale);
 }
 
 void extractSensor(const char *json, char *sensor, size_t sensorSize)
@@ -133,7 +124,8 @@ void queueJson(uint8_t seq, const char *json)
   txJsonLen = strlen(txJson);
   txJsonOffset = 0;
   txSeq = seq;
-  txPhase = 0;
+  txChunkIndex = 0;
+  txTotalChunks = max<uint8_t>(1, (txJsonLen + CUSTOM_HID_JSON_PAYLOAD_SIZE - 1) / CUSTOM_HID_JSON_PAYLOAD_SIZE);
   txPending = true;
 }
 
@@ -150,7 +142,7 @@ void processJsonCommand(const char *json)
 
   if (hasText(json, "\"cmd\":\"ping\"")) {
     char out[120];
-    snprintf(out, sizeof(out), "{\"seq\":%u,\"ok\":true,\"device\":\"nucleo_f446re_hid_can_dummy\",\"nodes\":48}", seq);
+    snprintf(out, sizeof(out), "{\"seq\":%u,\"ok\":true,\"device\":\"nucleo_f446re_hid_can_dummy64\",\"nodes\":48}", seq);
     queueJson(seq, out);
     return;
   }
@@ -173,15 +165,15 @@ void processJsonCommand(const char *json)
     size_t off = 0;
     for (uint8_t ch = 1; ch <= 8; ch++) {
       off += snprintf(pt100 + off, sizeof(pt100) - off, "%s", ch == 1 ? "" : ",");
-      appendScaled(pt100, sizeof(pt100), off, dummyValueScaled(node, "pt100", ch, 100), 100, 2);
+      appendScaled(pt100, sizeof(pt100), off, dummyValueScaled(node, "pt100", ch, 100), 100);
     }
 
     char flow[16], steam[16], ph[16], kwh[20], turbidity[16];
-    scaledToText(flow, sizeof(flow), dummyValueScaled(node, "flow", 0, 100), 100, 2);
-    scaledToText(steam, sizeof(steam), dummyValueScaled(node, "steam", 0, 100), 100, 2);
-    scaledToText(ph, sizeof(ph), dummyValueScaled(node, "ph", 0, 100), 100, 2);
-    scaledToText(kwh, sizeof(kwh), dummyValueScaled(node, "kwh", 0, 1000), 1000, 3);
-    scaledToText(turbidity, sizeof(turbidity), dummyValueScaled(node, "turbidity", 0, 100), 100, 2);
+    scaledToText(flow, sizeof(flow), dummyValueScaled(node, "flow", 0, 100), 100);
+    scaledToText(steam, sizeof(steam), dummyValueScaled(node, "steam", 0, 100), 100);
+    scaledToText(ph, sizeof(ph), dummyValueScaled(node, "ph", 0, 100), 100);
+    scaledToText(kwh, sizeof(kwh), dummyValueScaled(node, "kwh", 0, 1000), 1000);
+    scaledToText(turbidity, sizeof(turbidity), dummyValueScaled(node, "turbidity", 0, 100), 100);
 
     snprintf(out, sizeof(out),
              "{\"seq\":%u,\"ok\":true,\"node\":%d,\"data\":{\"flow\":%s,\"steam\":%s,\"ph\":%s,\"kwh\":%s,\"turbidity\":%s,\"pt100\":[%s]}}",
@@ -194,11 +186,9 @@ void processJsonCommand(const char *json)
     char sensor[20];
     extractSensor(json, sensor, sizeof(sensor));
     const uint8_t channel = static_cast<uint8_t>(findJsonInt(json, "\"ch\"", 1));
-    const bool threeDecimals = strcmp(sensor, "kwh") == 0;
-    const uint16_t scale = threeDecimals ? 1000 : 100;
-    const uint8_t decimals = threeDecimals ? 3 : 2;
+    const uint16_t scale = strcmp(sensor, "kwh") == 0 ? 1000 : 100;
     char value[20];
-    scaledToText(value, sizeof(value), dummyValueScaled(node, sensor, channel, scale), scale, decimals);
+    scaledToText(value, sizeof(value), dummyValueScaled(node, sensor, channel, scale), scale);
 
     char out[220];
     snprintf(out, sizeof(out),
@@ -213,73 +203,80 @@ void processJsonCommand(const char *json)
   queueJson(seq, out);
 }
 
-void handleRxReport(uint8_t cmd, uint8_t value)
+void handleRxReport(const uint8_t *report)
 {
-  if (cmd == OUT_START) {
-    activeSeq = value;
+  if (report[0] != REPORT_TYPE_JSON) return;
+
+  const uint8_t seq = report[1];
+  const uint8_t chunkIndex = report[2];
+  const uint8_t totalChunks = report[3];
+  const uint8_t payloadLen = report[4];
+  if (payloadLen > CUSTOM_HID_JSON_PAYLOAD_SIZE || totalChunks == 0) return;
+
+  if (chunkIndex == 0 || seq != activeSeq) {
     rxJsonLen = 0;
-    rxStreaming = true;
-    rxPulseUntil = millis() + LED_PULSE_MS;
+    activeSeq = seq;
+    expectedChunks = totalChunks;
+    receivedChunks = 0;
+  }
+
+  if (seq != activeSeq || totalChunks != expectedChunks || chunkIndex != receivedChunks) {
+    rxJsonLen = 0;
+    receivedChunks = 0;
     return;
   }
 
-  if (!rxStreaming) {
+  if (rxJsonLen + payloadLen >= sizeof(rxJson)) {
+    rxJsonLen = 0;
+    receivedChunks = 0;
     return;
   }
 
-  if (cmd == OUT_DATA) {
-    if (rxJsonLen + 1 < sizeof(rxJson)) {
-      rxJson[rxJsonLen++] = static_cast<char>(value);
-      rxJson[rxJsonLen] = '\0';
-    }
-    rxPulseUntil = millis() + LED_PULSE_MS;
-    return;
-  }
+  memcpy(rxJson + rxJsonLen, report + 5, payloadLen);
+  rxJsonLen += payloadLen;
+  rxJson[rxJsonLen] = '\0';
+  receivedChunks++;
+  rxPulseUntil = millis() + LED_PULSE_MS;
 
-  if (cmd == OUT_END) {
-    rxStreaming = false;
-    rxPulseUntil = millis() + LED_PULSE_MS;
+  if (receivedChunks >= expectedChunks) {
     processJsonCommand(rxJson);
+    rxJsonLen = 0;
+    receivedChunks = 0;
   }
 }
 
-bool sendReport(uint8_t cmd, uint8_t value)
+bool sendReport(const uint8_t *report)
 {
-  if (millis() < nextTxAllowedMs) {
-    return false;
-  }
-
-  uint8_t report[CUSTOM_HID_REPORT_SIZE] = {cmd, value};
-  const uint8_t status = USBD_CUSTOM_HID_SendReport(&hUSBD_Device_CustomHID, report, sizeof(report));
+  if (millis() < nextTxAllowedMs) return false;
+  const uint8_t status = USBD_CUSTOM_HID_SendReport(&hUSBD_Device_CustomHID, const_cast<uint8_t *>(report), CUSTOM_HID_REPORT_SIZE);
   if (status == USBD_OK) {
     txPulseUntil = millis() + LED_PULSE_MS;
-    nextTxAllowedMs = millis() + 2;
+    nextTxAllowedMs = millis() + TX_SPACING_MS;
     return true;
   }
   return false;
 }
 
-void sendNextTxReport()
+void sendNextTxChunk()
 {
-  if (!txPending) {
-    return;
-  }
+  if (!txPending) return;
 
-  if (txPhase == 0) {
-    if (sendReport(IN_START, txSeq)) {
-      txPhase = 1;
-    }
-    return;
-  }
+  uint8_t report[CUSTOM_HID_REPORT_SIZE] = {};
+  const size_t remaining = txJsonLen - txJsonOffset;
+  const uint8_t payloadLen = static_cast<uint8_t>(min(static_cast<size_t>(CUSTOM_HID_JSON_PAYLOAD_SIZE), remaining));
 
-  if (txJsonOffset < txJsonLen) {
-    if (sendReport(IN_DATA, static_cast<uint8_t>(txJson[txJsonOffset]))) {
-      txJsonOffset++;
-    }
-    return;
-  }
+  report[0] = REPORT_TYPE_JSON;
+  report[1] = txSeq;
+  report[2] = txChunkIndex;
+  report[3] = txTotalChunks;
+  report[4] = payloadLen;
+  memcpy(report + 5, txJson + txJsonOffset, payloadLen);
 
-  if (sendReport(IN_END, 0)) {
+  if (!sendReport(report)) return;
+
+  txJsonOffset += payloadLen;
+  txChunkIndex++;
+  if (txChunkIndex >= txTotalChunks) {
     txPending = false;
   }
 }
@@ -298,10 +295,10 @@ __ALIGN_BEGIN static uint8_t customHidReportDescriptor[USBD_CUSTOM_HID_REPORT_DE
   0x15, 0x00,
   0x26, 0xFF, 0x00,
   0x75, 0x08,
-  0x95, 0x02,
+  0x95, 0x40,
   0x09, 0x01,
   0x81, 0x02,
-  0x95, 0x02,
+  0x95, 0x40,
   0x09, 0x01,
   0x91, 0x02,
   0xC0
@@ -310,11 +307,14 @@ __ALIGN_BEGIN static uint8_t customHidReportDescriptor[USBD_CUSTOM_HID_REPORT_DE
 static int8_t customHidInit() { return USBD_OK; }
 static int8_t customHidDeInit() { return USBD_OK; }
 
-static int8_t customHidOutEvent(uint8_t cmd, uint8_t value)
+static int8_t customHidOutEvent(uint8_t, uint8_t)
 {
-  rxReport0 = cmd;
-  rxReport1 = value;
-  rxReportAvailable = true;
+  USBD_CUSTOM_HID_HandleTypeDef *hid =
+      reinterpret_cast<USBD_CUSTOM_HID_HandleTypeDef *>(hUSBD_Device_CustomHID.pClassDataCmsit[hUSBD_Device_CustomHID.classId]);
+  if (hid != nullptr) {
+    memcpy(rxReport, hid->Report_buf, sizeof(rxReport));
+    rxReportAvailable = true;
+  }
   USBD_CUSTOM_HID_ReceivePacket(&hUSBD_Device_CustomHID);
   return USBD_OK;
 }
@@ -330,9 +330,7 @@ static USBD_CUSTOM_HID_ItfTypeDef customHidInterface = {
 
 void CustomHID_begin()
 {
-  if (customHidInitialized) {
-    return;
-  }
+  if (customHidInitialized) return;
 
   delay(500);
 
@@ -347,15 +345,15 @@ void CustomHID_begin()
 void CustomHID_task()
 {
   if (rxReportAvailable) {
+    uint8_t report[CUSTOM_HID_REPORT_SIZE];
     noInterrupts();
-    const uint8_t cmd = rxReport0;
-    const uint8_t value = rxReport1;
+    memcpy(report, rxReport, sizeof(report));
     rxReportAvailable = false;
     interrupts();
-    handleRxReport(cmd, value);
+    handleRxReport(report);
   }
 
-  sendNextTxReport();
+  sendNextTxChunk();
 }
 
 bool CustomHID_rxActive()

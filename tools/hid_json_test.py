@@ -1,17 +1,13 @@
 import argparse
 import json
+import math
 import time
 
 VID = 0x0483
 PID = 0x5750
-REPORT_SIZE = 2
-
-OUT_START = 0x10
-OUT_DATA = 0x11
-OUT_END = 0x12
-IN_START = 0x20
-IN_DATA = 0x21
-IN_END = 0x22
+REPORT_SIZE = 64
+PAYLOAD_SIZE = 59
+REPORT_TYPE_JSON = 0x01
 
 
 def open_device():
@@ -26,56 +22,67 @@ def open_device():
     return dev
 
 
-def write_report(dev, cmd, value):
-    dev.write(bytes([0, cmd & 0xFF, value & 0xFF]))
-    time.sleep(0.002)
-
-
 def write_json(dev, message):
     raw = json.dumps(message, separators=(",", ":")).encode("utf-8")
     seq = int(message.get("seq", 1)) & 0xFF
+    total = max(1, math.ceil(len(raw) / PAYLOAD_SIZE))
 
-    write_report(dev, OUT_START, seq)
-    for byte in raw:
-        write_report(dev, OUT_DATA, byte)
-    write_report(dev, OUT_END, 0)
+    for index in range(total):
+        chunk = raw[index * PAYLOAD_SIZE:(index + 1) * PAYLOAD_SIZE]
+        report = bytearray(REPORT_SIZE)
+        report[0] = REPORT_TYPE_JSON
+        report[1] = seq
+        report[2] = index
+        report[3] = total
+        report[4] = len(chunk)
+        report[5:5 + len(chunk)] = chunk
+        dev.write(bytes([0]) + bytes(report))
+        time.sleep(0.002)
 
 
 def normalize_report(report):
     if not report:
         return None
-    if len(report) >= 3 and report[0] == 0 and report[1] in (IN_START, IN_DATA, IN_END):
-        return report[1], report[2]
-    if len(report) >= 2:
-        return report[0], report[1]
-    return None
+    if len(report) >= REPORT_SIZE + 1 and report[0] == 0:
+        report = report[1:]
+    if len(report) < REPORT_SIZE:
+        report = report + [0] * (REPORT_SIZE - len(report))
+    if report[0] != REPORT_TYPE_JSON:
+        return None
+    return report
 
 
 def read_json(dev, timeout_ms=5000, debug=False):
     deadline = time.time() + timeout_ms / 1000
-    started = False
+    chunks = {}
+    total = None
     seq = None
-    data = bytearray()
 
     while time.time() < deadline:
-        report = dev.read(64, timeout_ms=100)
-        if not report:
+        raw = dev.read(REPORT_SIZE + 1, timeout_ms=100)
+        if not raw:
             continue
         if debug:
-            print("RAW:", report[:8])
+            print("RAW:", raw[:12])
 
-        normalized = normalize_report(report)
-        if normalized is None:
+        report = normalize_report(raw)
+        if report is None:
             continue
-        cmd, value = normalized
-        if cmd == IN_START:
-            started = True
-            seq = value
-            data.clear()
-        elif cmd == IN_DATA and started:
-            data.append(value)
-        elif cmd == IN_END and started:
-            return seq, json.loads(data.decode("utf-8"))
+
+        seq = report[1]
+        index = report[2]
+        total = report[3]
+        length = report[4]
+        chunks[index] = bytes(report[5:5 + length])
+
+        if total and len(chunks) >= total:
+            data = b"".join(chunks[i] for i in range(total))
+            text = data.decode("utf-8")
+            try:
+                return seq, json.loads(text)
+            except json.JSONDecodeError:
+                print("RX text:", text)
+                raise
 
     raise TimeoutError("Timeout menunggu response HID")
 
