@@ -11,7 +11,7 @@ extern "C" USBD_HandleTypeDef hUSBD_Device_CustomHID;
 namespace {
 
 constexpr uint8_t REPORT_TYPE_JSON = 0x01;
-constexpr size_t JSON_BUFFER_SIZE = 640;
+constexpr size_t JSON_BUFFER_SIZE = 1024;
 constexpr uint16_t LED_PULSE_MS = 80;
 constexpr uint16_t TX_SPACING_MS = 2;
 constexpr uint32_t LICENSE_MAGIC = 0x4348414BUL;
@@ -203,6 +203,9 @@ const char *sensorUnit(const char *sensor)
   if (strcmp(sensor, "ph") == 0) return "pH";
   if (strcmp(sensor, "kwh") == 0) return "kWh";
   if (strcmp(sensor, "turbidity") == 0) return "NTU";
+  if (strcmp(sensor, "cod") == 0) return "mg/L";
+  if (strcmp(sensor, "bod") == 0) return "mg/L";
+  if (strcmp(sensor, "tds") == 0) return "ppm";
   if (strcmp(sensor, "pt100") == 0) return "C";
   return "";
 }
@@ -214,6 +217,9 @@ float dummyValue(uint8_t node, const char *sensor, uint8_t channel)
   if (strcmp(sensor, "ph") == 0) return 6.80f + (node % 12) * 0.03f;
   if (strcmp(sensor, "kwh") == 0) return 1200.0f + node * 17.35f;
   if (strcmp(sensor, "turbidity") == 0) return 3.5f + node * 0.12f;
+  if (strcmp(sensor, "cod") == 0) return 85.0f + node * 1.75f;
+  if (strcmp(sensor, "bod") == 0) return 28.0f + node * 0.85f;
+  if (strcmp(sensor, "tds") == 0) return 320.0f + node * 4.5f;
   if (strcmp(sensor, "pt100") == 0) return 30.0f + node * 0.10f + channel * 0.35f;
   return 0.0f;
 }
@@ -221,6 +227,12 @@ float dummyValue(uint8_t node, const char *sensor, uint8_t channel)
 int32_t dummyValueScaled(uint8_t node, const char *sensor, uint8_t channel, uint16_t scale)
 {
   return static_cast<int32_t>(dummyValue(node, sensor, channel) * scale + 0.5f);
+}
+
+uint16_t sensorScale(const char *sensor)
+{
+  if (strcmp(sensor, "kwh") == 0) return 1000;
+  return 100;
 }
 
 void appendScaled(char *buffer, size_t bufferSize, size_t &offset, int32_t scaled, uint16_t scale)
@@ -346,8 +358,8 @@ void processJsonCommand(const char *json)
     return;
   }
 
-  if (hasText(json, "\"cmd\":\"get_all\"")) {
-    char out[480];
+  if (hasText(json, "\"cmd\":\"get_all\"") || hasText(json, "\"cmd\":\"read_all\"")) {
+    char out[760];
     char pt100[120] = {};
     size_t off = 0;
     for (uint8_t ch = 1; ch <= 8; ch++) {
@@ -355,16 +367,19 @@ void processJsonCommand(const char *json)
       appendScaled(pt100, sizeof(pt100), off, dummyValueScaled(node, "pt100", ch, 100), 100);
     }
 
-    char flow[16], steam[16], ph[16], kwh[20], turbidity[16];
+    char flow[16], steam[16], ph[16], kwh[20], turbidity[16], cod[16], bod[16], tds[16];
     scaledToText(flow, sizeof(flow), dummyValueScaled(node, "flow", 0, 100), 100);
     scaledToText(steam, sizeof(steam), dummyValueScaled(node, "steam", 0, 100), 100);
     scaledToText(ph, sizeof(ph), dummyValueScaled(node, "ph", 0, 100), 100);
     scaledToText(kwh, sizeof(kwh), dummyValueScaled(node, "kwh", 0, 1000), 1000);
     scaledToText(turbidity, sizeof(turbidity), dummyValueScaled(node, "turbidity", 0, 100), 100);
+    scaledToText(cod, sizeof(cod), dummyValueScaled(node, "cod", 0, 100), 100);
+    scaledToText(bod, sizeof(bod), dummyValueScaled(node, "bod", 0, 100), 100);
+    scaledToText(tds, sizeof(tds), dummyValueScaled(node, "tds", 0, 100), 100);
 
     snprintf(out, sizeof(out),
-             "{\"seq\":%u,\"ok\":true,\"node\":%d,\"data\":{\"flow\":%s,\"steam\":%s,\"ph\":%s,\"kwh\":%s,\"turbidity\":%s,\"pt100\":[%s]}}",
-             seq, node, flow, steam, ph, kwh, turbidity, pt100);
+             "{\"seq\":%u,\"ok\":true,\"node\":%d,\"protocol\":\"read_all\",\"data\":{\"flow\":%s,\"steam\":%s,\"ph\":%s,\"kwh\":%s,\"turbidity\":%s,\"cod\":%s,\"bod\":%s,\"tds\":%s,\"pt100\":[%s]},\"units\":{\"flow\":\"L/min\",\"steam\":\"kg/h\",\"ph\":\"pH\",\"kwh\":\"kWh\",\"turbidity\":\"NTU\",\"cod\":\"mg/L\",\"bod\":\"mg/L\",\"tds\":\"ppm\",\"pt100\":\"C\"}}",
+             seq, node, flow, steam, ph, kwh, turbidity, cod, bod, tds, pt100);
     queueJson(seq, out);
     return;
   }
@@ -373,7 +388,7 @@ void processJsonCommand(const char *json)
     char sensor[20];
     extractSensor(json, sensor, sizeof(sensor));
     const uint8_t channel = static_cast<uint8_t>(findJsonInt(json, "\"ch\"", 1));
-    const uint16_t scale = strcmp(sensor, "kwh") == 0 ? 1000 : 100;
+    const uint16_t scale = sensorScale(sensor);
     char value[20];
     scaledToText(value, sizeof(value), dummyValueScaled(node, sensor, channel, scale), scale);
 

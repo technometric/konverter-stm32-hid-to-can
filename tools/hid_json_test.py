@@ -89,9 +89,9 @@ def read_json(dev, timeout_ms=5000, debug=False):
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--cmd", default="get_all", choices=["ping", "get", "get_all", "scan_all", "license_status", "device_info", "activate"])
+    parser.add_argument("--cmd", default="get_all", choices=["ping", "get", "get_all", "read_all", "scan_all", "license_status", "device_info", "activate"])
     parser.add_argument("--node", type=int, default=1)
-    parser.add_argument("--sensor", default="flow", choices=["flow", "steam", "ph", "kwh", "turbidity", "pt100"])
+    parser.add_argument("--sensor", default="flow", choices=["flow", "steam", "ph", "kwh", "turbidity", "cod", "bod", "tds", "pt100"])
     parser.add_argument("--ch", type=int, default=1)
     parser.add_argument("--seq", type=int, default=1)
     parser.add_argument("--passcode", default="")
@@ -100,7 +100,7 @@ def main():
     args = parser.parse_args()
 
     message = {"seq": args.seq, "cmd": args.cmd}
-    if args.cmd in ("get", "get_all"):
+    if args.cmd in ("get", "get_all", "read_all"):
         message["node"] = args.node
     if args.cmd == "get":
         message["sensor"] = args.sensor

@@ -118,7 +118,7 @@ Public Class Form1
         cmbStm32Sensor.Location = New Point(603, 46)
         cmbStm32Sensor.Size = New Size(100, 21)
         cmbStm32Sensor.DropDownStyle = ComboBoxStyle.DropDownList
-        cmbStm32Sensor.Items.AddRange(New Object() {"flow", "steam", "ph", "kwh", "turbidity", "pt100"})
+        cmbStm32Sensor.Items.AddRange(New Object() {"flow", "steam", "ph", "kwh", "turbidity", "cod", "bod", "tds", "pt100"})
         cmbStm32Sensor.SelectedIndex = 0
         AddHandler cmbStm32Sensor.SelectedIndexChanged, AddressOf CmbStm32Sensor_SelectedIndexChanged
         Controls.Add(cmbStm32Sensor)
