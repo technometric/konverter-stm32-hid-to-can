@@ -212,16 +212,37 @@ const char *sensorUnit(const char *sensor)
 
 float dummyValue(uint8_t node, const char *sensor, uint8_t channel)
 {
-  if (strcmp(sensor, "flow") == 0) return 10.0f + node * 0.25f;
-  if (strcmp(sensor, "steam") == 0) return 40.0f + node * 0.5f;
-  if (strcmp(sensor, "ph") == 0) return 6.80f + (node % 12) * 0.03f;
-  if (strcmp(sensor, "kwh") == 0) return 1200.0f + node * 17.35f;
-  if (strcmp(sensor, "turbidity") == 0) return 3.5f + node * 0.12f;
-  if (strcmp(sensor, "cod") == 0) return 85.0f + node * 1.75f;
-  if (strcmp(sensor, "bod") == 0) return 28.0f + node * 0.85f;
-  if (strcmp(sensor, "tds") == 0) return 320.0f + node * 4.5f;
-  if (strcmp(sensor, "pt100") == 0) return 30.0f + node * 0.10f + channel * 0.35f;
-  return 0.0f;
+  float base = 0.0f;
+  float span = 10.0f;
+
+  if (strcmp(sensor, "flow") == 0) base = 10.0f + node * 0.25f;
+  else if (strcmp(sensor, "steam") == 0) base = 40.0f + node * 0.5f;
+  else if (strcmp(sensor, "ph") == 0) {
+    base = 6.80f + (node % 12) * 0.03f;
+    span = 0.10f;
+  }
+  else if (strcmp(sensor, "kwh") == 0) {
+    base = 1200.0f + node * 17.35f;
+    span = 10.0f;
+  }
+  else if (strcmp(sensor, "turbidity") == 0) base = 3.5f + node * 0.12f;
+  else if (strcmp(sensor, "cod") == 0) base = 85.0f + node * 1.75f;
+  else if (strcmp(sensor, "bod") == 0) base = 28.0f + node * 0.85f;
+  else if (strcmp(sensor, "tds") == 0) base = 320.0f + node * 4.5f;
+  else if (strcmp(sensor, "pt100") == 0) {
+    base = 30.0f + node * 0.10f + channel * 0.35f;
+    span = 1.0f;
+  }
+  else return 0.0f;
+
+  uint32_t hash = millis() / 100UL;
+  hash ^= static_cast<uint32_t>(node) * 2654435761UL;
+  hash ^= static_cast<uint32_t>(channel) * 2246822519UL;
+  hash = fnv1aUpdate(hash, reinterpret_cast<const uint8_t *>(sensor), strlen(sensor));
+  const int32_t jitterStep = static_cast<int32_t>(hash % 2001UL) - 1000;
+  const float jitter = span * static_cast<float>(jitterStep) / 1000.0f;
+  const float value = base + jitter;
+  return value < 0.0f ? 0.0f : value;
 }
 
 int32_t dummyValueScaled(uint8_t node, const char *sensor, uint8_t channel, uint16_t scale)

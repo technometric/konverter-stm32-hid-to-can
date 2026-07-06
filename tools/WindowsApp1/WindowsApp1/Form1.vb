@@ -15,6 +15,11 @@ Public Class Form1
     Private btnStm32GetId As Button
     Private btnStm32Activate As Button
     Private btnStm32License As Button
+    Private btnStm32Dashboard As Button
+    Private stm32DashboardTimer As Timer
+    Private stm32DashboardLabels As New Dictionary(Of String, Label)
+    Private lblStm32DashboardStatus As Label
+    Private numStm32DashboardInterval As NumericUpDown
 
     Sub Delay(ms As Integer)
         Dim t As DateTime = DateTime.Now.AddMilliseconds(ms)
@@ -159,6 +164,64 @@ Public Class Form1
         btnStm32License.Text = "License Status"
         AddHandler btnStm32License.Click, AddressOf BtnStm32License_Click
         Controls.Add(btnStm32License)
+
+        btnStm32Dashboard = New Button()
+        btnStm32Dashboard.Location = New Point(760, 214)
+        btnStm32Dashboard.Size = New Size(135, 23)
+        btnStm32Dashboard.Text = "Dashboard Start"
+        AddHandler btnStm32Dashboard.Click, AddressOf BtnStm32Dashboard_Click
+        Controls.Add(btnStm32Dashboard)
+
+        numStm32DashboardInterval = New NumericUpDown()
+        numStm32DashboardInterval.Location = New Point(900, 215)
+        numStm32DashboardInterval.Size = New Size(60, 20)
+        numStm32DashboardInterval.Minimum = 100
+        numStm32DashboardInterval.Maximum = 1000
+        numStm32DashboardInterval.Increment = 100
+        numStm32DashboardInterval.Value = 1000
+        Controls.Add(numStm32DashboardInterval)
+
+        Dim intervalLabel As New Label()
+        intervalLabel.Location = New Point(900, 238)
+        intervalLabel.Size = New Size(60, 18)
+        intervalLabel.Text = "ms"
+        Controls.Add(intervalLabel)
+
+        lblStm32DashboardStatus = New Label()
+        lblStm32DashboardStatus.Location = New Point(760, 242)
+        lblStm32DashboardStatus.Size = New Size(200, 18)
+        lblStm32DashboardStatus.Text = "Dashboard idle"
+        Controls.Add(lblStm32DashboardStatus)
+
+        AddDashboardValue("flow", "Flow", "L/min", 262)
+        AddDashboardValue("steam", "Steam", "kg/h", 282)
+        AddDashboardValue("ph", "pH", "pH", 302)
+        AddDashboardValue("kwh", "KWH", "kWh", 322)
+        AddDashboardValue("turbidity", "Turbidity", "NTU", 342)
+        AddDashboardValue("cod", "COD", "mg/L", 362)
+        AddDashboardValue("bod", "BOD", "mg/L", 382)
+        AddDashboardValue("tds", "TDS", "ppm", 402)
+        AddDashboardValue("pt100", "PT100", "C", 422)
+
+        stm32DashboardTimer = New Timer()
+        stm32DashboardTimer.Interval = DashboardIntervalMs()
+        AddHandler stm32DashboardTimer.Tick, AddressOf Stm32DashboardTimer_Tick
+    End Sub
+
+    Private Sub AddDashboardValue(key As String, caption As String, unitText As String, top As Integer)
+        Dim nameLabel As New Label()
+        nameLabel.Location = New Point(760, top)
+        nameLabel.Size = New Size(72, 18)
+        nameLabel.Text = caption
+        Controls.Add(nameLabel)
+
+        Dim valueLabel As New Label()
+        valueLabel.Location = New Point(835, top)
+        valueLabel.Size = New Size(125, 18)
+        valueLabel.Text = "- " & unitText
+        Controls.Add(valueLabel)
+
+        stm32DashboardLabels(key) = valueLabel
     End Sub
 
     Private Function SelectedNodeId() As Integer
@@ -187,6 +250,13 @@ Public Class Form1
         Return Stm32SendJsonText(cmd.ToString(Newtonsoft.Json.Formatting.None))
     End Function
 
+    Private Function DashboardIntervalMs() As Integer
+        If numStm32DashboardInterval Is Nothing Then
+            Return 1000
+        End If
+        Return CInt(numStm32DashboardInterval.Value)
+    End Function
+
     Private Sub CmbStm32Sensor_SelectedIndexChanged(sender As Object, e As EventArgs)
         If numStm32Pt100Channel IsNot Nothing Then
             numStm32Pt100Channel.Enabled = (SelectedSensorName() = "pt100")
@@ -209,6 +279,7 @@ Public Class Form1
 
     Private Sub BtnStm32GetAll_Click(sender As Object, e As EventArgs)
         TextBox2.Text = Stm32GetAllJson(SelectedNodeId())
+        UpdateStm32Dashboard(TextBox2.Text)
     End Sub
 
     Private Sub BtnStm32GetSensor_Click(sender As Object, e As EventArgs)
@@ -245,7 +316,86 @@ Public Class Form1
         TextBox2.Text = Stm32Command(cmd)
     End Sub
 
+    Private Sub BtnStm32Dashboard_Click(sender As Object, e As EventArgs)
+        If stm32DashboardTimer.Enabled Then
+            stm32DashboardTimer.Enabled = False
+            btnStm32Dashboard.Text = "Dashboard Start"
+            lblStm32DashboardStatus.Text = "Dashboard stopped"
+            Return
+        End If
+
+        btnStm32Dashboard.Text = "Dashboard Stop"
+        stm32DashboardTimer.Enabled = True
+        RefreshStm32Dashboard()
+    End Sub
+
+    Private Sub Stm32DashboardTimer_Tick(sender As Object, e As EventArgs)
+        RefreshStm32Dashboard()
+    End Sub
+
+    Private Sub RefreshStm32Dashboard()
+        If stm32DashboardTimer IsNot Nothing Then
+            stm32DashboardTimer.Enabled = False
+        End If
+
+        Try
+            Dim jsonText As String = Stm32GetAllJson(SelectedNodeId())
+            TextBox2.Text = jsonText
+            UpdateStm32Dashboard(jsonText)
+        Catch ex As Exception
+            lblStm32DashboardStatus.Text = "Dashboard error"
+            TextBox2.Text = ex.Message
+        Finally
+            If btnStm32Dashboard IsNot Nothing AndAlso btnStm32Dashboard.Text = "Dashboard Stop" Then
+                stm32DashboardTimer.Interval = DashboardIntervalMs()
+                stm32DashboardTimer.Enabled = True
+            End If
+        End Try
+    End Sub
+
+    Private Sub UpdateStm32Dashboard(jsonText As String)
+        Try
+            Dim root As JObject = JObject.Parse(jsonText)
+            If root("ok") IsNot Nothing AndAlso root("ok").ToObject(Of Boolean)() = False Then
+                lblStm32DashboardStatus.Text = root("err").ToString()
+                Return
+            End If
+
+            Dim data As JObject = TryCast(root("data"), JObject)
+            If data Is Nothing Then
+                lblStm32DashboardStatus.Text = "No read_all data"
+                Return
+            End If
+
+            SetDashboardValue("flow", data, "L/min")
+            SetDashboardValue("steam", data, "kg/h")
+            SetDashboardValue("ph", data, "pH")
+            SetDashboardValue("kwh", data, "kWh")
+            SetDashboardValue("turbidity", data, "NTU")
+            SetDashboardValue("cod", data, "mg/L")
+            SetDashboardValue("bod", data, "mg/L")
+            SetDashboardValue("tds", data, "ppm")
+
+            If data("pt100") IsNot Nothing Then
+                stm32DashboardLabels("pt100").Text = data("pt100").ToString(Newtonsoft.Json.Formatting.None) & " C"
+            End If
+
+            lblStm32DashboardStatus.Text = "Updated " & DateTime.Now.ToString("HH:mm:ss")
+        Catch ex As Exception
+            lblStm32DashboardStatus.Text = "Parse error"
+        End Try
+    End Sub
+
+    Private Sub SetDashboardValue(key As String, data As JObject, unitText As String)
+        If stm32DashboardLabels.ContainsKey(key) AndAlso data(key) IsNot Nothing Then
+            stm32DashboardLabels(key).Text = data(key).ToString() & " " & unitText
+        End If
+    End Sub
+
     Private Sub Form1_FormClosing(sender As Object, e As FormClosingEventArgs) Handles MyBase.FormClosing
+        If stm32DashboardTimer IsNot Nothing Then
+            stm32DashboardTimer.Enabled = False
+        End If
         CloseStm32ConverterDevice()
     End Sub
 
