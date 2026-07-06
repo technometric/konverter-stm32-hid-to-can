@@ -89,11 +89,13 @@ def read_json(dev, timeout_ms=5000, debug=False):
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--cmd", default="get_all", choices=["ping", "get", "get_all", "scan_all"])
+    parser.add_argument("--cmd", default="get_all", choices=["ping", "get", "get_all", "scan_all", "license_status", "device_info", "activate"])
     parser.add_argument("--node", type=int, default=1)
     parser.add_argument("--sensor", default="flow", choices=["flow", "steam", "ph", "kwh", "turbidity", "pt100"])
     parser.add_argument("--ch", type=int, default=1)
     parser.add_argument("--seq", type=int, default=1)
+    parser.add_argument("--passcode", default="")
+    parser.add_argument("--token", default="")
     parser.add_argument("--debug", action="store_true")
     args = parser.parse_args()
 
@@ -104,6 +106,10 @@ def main():
         message["sensor"] = args.sensor
         if args.sensor == "pt100":
             message["ch"] = args.ch
+    if args.cmd == "device_info":
+        message["passcode"] = args.passcode
+    if args.cmd == "activate":
+        message["token"] = args.token
 
     dev = open_device()
     try:

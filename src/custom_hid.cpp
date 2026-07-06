@@ -1,6 +1,7 @@
 #include "custom_hid.h"
 
 #include <string.h>
+#include "stm32f4xx_hal.h"
 #include "usbd_core.h"
 #include "usbd_customhid.h"
 #include "usbd_desc.h"
@@ -13,6 +14,16 @@ constexpr uint8_t REPORT_TYPE_JSON = 0x01;
 constexpr size_t JSON_BUFFER_SIZE = 640;
 constexpr uint16_t LED_PULSE_MS = 80;
 constexpr uint16_t TX_SPACING_MS = 2;
+constexpr uint32_t LICENSE_MAGIC = 0x4348414BUL;
+constexpr uint32_t LICENSE_FLASH_ADDR = 0x08060000UL;
+constexpr const char *DEVICE_INFO_PASSCODE = "2468";
+constexpr const char *TOKEN_SECRET = "stm32-hid-can-v1";
+
+struct LicenseRecord {
+  uint32_t magic;
+  char token[65];
+  uint32_t checksum;
+};
 
 volatile bool rxReportAvailable = false;
 uint8_t rxReport[CUSTOM_HID_REPORT_SIZE] = {};
@@ -34,6 +45,121 @@ bool txPending = false;
 uint32_t rxPulseUntil = 0;
 uint32_t txPulseUntil = 0;
 uint32_t nextTxAllowedMs = 0;
+bool licenseLoaded = false;
+bool licenseValid = false;
+char storedToken[65] = {};
+
+uint32_t fnv1aUpdate(uint32_t hash, const uint8_t *data, size_t len)
+{
+  for (size_t i = 0; i < len; i++) {
+    hash ^= data[i];
+    hash *= 16777619UL;
+  }
+  return hash;
+}
+
+void uidHex(char *out, size_t outSize)
+{
+  snprintf(out, outSize, "%08lX%08lX%08lX",
+           static_cast<unsigned long>(HAL_GetUIDw0()),
+           static_cast<unsigned long>(HAL_GetUIDw1()),
+           static_cast<unsigned long>(HAL_GetUIDw2()));
+}
+
+void makeExpectedToken(char *out, size_t outSize)
+{
+  char uid[25];
+  uidHex(uid, sizeof(uid));
+
+  uint32_t h1 = 2166136261UL;
+  h1 = fnv1aUpdate(h1, reinterpret_cast<const uint8_t *>(TOKEN_SECRET), strlen(TOKEN_SECRET));
+  h1 = fnv1aUpdate(h1, reinterpret_cast<const uint8_t *>(uid), strlen(uid));
+  h1 = fnv1aUpdate(h1, reinterpret_cast<const uint8_t *>("A"), 1);
+
+  uint32_t h2 = 2166136261UL;
+  h2 = fnv1aUpdate(h2, reinterpret_cast<const uint8_t *>(uid), strlen(uid));
+  h2 = fnv1aUpdate(h2, reinterpret_cast<const uint8_t *>(TOKEN_SECRET), strlen(TOKEN_SECRET));
+  h2 = fnv1aUpdate(h2, reinterpret_cast<const uint8_t *>("B"), 1);
+
+  uint32_t h3 = 2166136261UL;
+  h3 = fnv1aUpdate(h3, reinterpret_cast<const uint8_t *>(TOKEN_SECRET), strlen(TOKEN_SECRET));
+  h3 = fnv1aUpdate(h3, reinterpret_cast<const uint8_t *>("C"), 1);
+  h3 = fnv1aUpdate(h3, reinterpret_cast<const uint8_t *>(uid), strlen(uid));
+
+  uint32_t h4 = 2166136261UL;
+  h4 = fnv1aUpdate(h4, reinterpret_cast<const uint8_t *>(uid), strlen(uid));
+  h4 = fnv1aUpdate(h4, reinterpret_cast<const uint8_t *>("D"), 1);
+  h4 = fnv1aUpdate(h4, reinterpret_cast<const uint8_t *>(TOKEN_SECRET), strlen(TOKEN_SECRET));
+
+  snprintf(out, outSize, "%08lX%08lX%08lX%08lX",
+           static_cast<unsigned long>(h1),
+           static_cast<unsigned long>(h2),
+           static_cast<unsigned long>(h3),
+           static_cast<unsigned long>(h4));
+}
+
+uint32_t licenseChecksum(const LicenseRecord &record)
+{
+  uint32_t hash = 2166136261UL;
+  hash = fnv1aUpdate(hash, reinterpret_cast<const uint8_t *>(&record.magic), sizeof(record.magic));
+  hash = fnv1aUpdate(hash, reinterpret_cast<const uint8_t *>(record.token), strnlen(record.token, sizeof(record.token)));
+  return hash;
+}
+
+void loadLicense()
+{
+  if (licenseLoaded) return;
+  licenseLoaded = true;
+
+  const LicenseRecord *record = reinterpret_cast<const LicenseRecord *>(LICENSE_FLASH_ADDR);
+  if (record->magic != LICENSE_MAGIC || record->checksum != licenseChecksum(*record)) {
+    licenseValid = false;
+    storedToken[0] = '\0';
+    return;
+  }
+
+  char expected[65];
+  makeExpectedToken(expected, sizeof(expected));
+  strncpy(storedToken, record->token, sizeof(storedToken) - 1);
+  storedToken[sizeof(storedToken) - 1] = '\0';
+  licenseValid = strcmp(storedToken, expected) == 0;
+}
+
+bool saveLicenseToken(const char *token)
+{
+  LicenseRecord record = {};
+  record.magic = LICENSE_MAGIC;
+  strncpy(record.token, token, sizeof(record.token) - 1);
+  record.checksum = licenseChecksum(record);
+
+  HAL_FLASH_Unlock();
+
+  FLASH_EraseInitTypeDef erase = {};
+  erase.TypeErase = FLASH_TYPEERASE_SECTORS;
+  erase.Sector = FLASH_SECTOR_7;
+  erase.NbSectors = 1;
+  erase.VoltageRange = FLASH_VOLTAGE_RANGE_3;
+  uint32_t sectorError = 0;
+  if (HAL_FLASHEx_Erase(&erase, &sectorError) != HAL_OK) {
+    HAL_FLASH_Lock();
+    return false;
+  }
+
+  const uint8_t *data = reinterpret_cast<const uint8_t *>(&record);
+  for (size_t i = 0; i < sizeof(record); i++) {
+    if (HAL_FLASH_Program(FLASH_TYPEPROGRAM_BYTE, LICENSE_FLASH_ADDR + i, data[i]) != HAL_OK) {
+      HAL_FLASH_Lock();
+      return false;
+    }
+  }
+
+  HAL_FLASH_Lock();
+  strncpy(storedToken, record.token, sizeof(storedToken) - 1);
+  storedToken[sizeof(storedToken) - 1] = '\0';
+  licenseValid = true;
+  licenseLoaded = true;
+  return true;
+}
 
 int findJsonInt(const char *json, const char *key, int fallback)
 {
@@ -47,6 +173,27 @@ int findJsonInt(const char *json, const char *key, int fallback)
 bool hasText(const char *json, const char *text)
 {
   return strstr(json, text) != nullptr;
+}
+
+bool extractJsonString(const char *json, const char *key, char *out, size_t outSize)
+{
+  const char *pos = strstr(json, key);
+  const char *colon = pos ? strchr(pos, ':') : nullptr;
+  const char *start = colon ? strchr(colon, '"') : nullptr;
+  if (start == nullptr) {
+    if (outSize > 0) out[0] = '\0';
+    return false;
+  }
+  start++;
+  const char *end = strchr(start, '"');
+  if (end == nullptr) {
+    if (outSize > 0) out[0] = '\0';
+    return false;
+  }
+  const size_t len = min(outSize - 1, static_cast<size_t>(end - start));
+  memcpy(out, start, len);
+  out[len] = '\0';
+  return true;
 }
 
 const char *sensorUnit(const char *sensor)
@@ -97,24 +244,10 @@ void scaledToText(char *buffer, size_t bufferSize, int32_t scaled, uint16_t scal
 
 void extractSensor(const char *json, char *sensor, size_t sensorSize)
 {
-  const char *key = strstr(json, "\"sensor\"");
-  const char *colon = key ? strchr(key, ':') : nullptr;
-  const char *start = colon ? strchr(colon, '"') : nullptr;
-  if (start == nullptr) {
+  if (!extractJsonString(json, "\"sensor\"", sensor, sensorSize)) {
     strncpy(sensor, "flow", sensorSize);
     sensor[sensorSize - 1] = '\0';
-    return;
   }
-  start++;
-  const char *end = strchr(start, '"');
-  if (end == nullptr) {
-    strncpy(sensor, "flow", sensorSize);
-    sensor[sensorSize - 1] = '\0';
-    return;
-  }
-  const size_t len = min(sensorSize - 1, static_cast<size_t>(end - start));
-  memcpy(sensor, start, len);
-  sensor[len] = '\0';
 }
 
 void queueJson(uint8_t seq, const char *json)
@@ -131,6 +264,8 @@ void queueJson(uint8_t seq, const char *json)
 
 void processJsonCommand(const char *json)
 {
+  loadLicense();
+
   const uint8_t seq = static_cast<uint8_t>(findJsonInt(json, "\"seq\"", activeSeq));
   const int node = findJsonInt(json, "\"node\"", 1);
   if (node < 1 || node > 48) {
@@ -142,7 +277,59 @@ void processJsonCommand(const char *json)
 
   if (hasText(json, "\"cmd\":\"ping\"")) {
     char out[120];
-    snprintf(out, sizeof(out), "{\"seq\":%u,\"ok\":true,\"device\":\"nucleo_f446re_hid_can_dummy64\",\"nodes\":48}", seq);
+    snprintf(out, sizeof(out), "{\"seq\":%u,\"ok\":true,\"device\":\"nucleo_f446re_hid_can_dummy64\",\"nodes\":48,\"licensed\":%s}",
+             seq, licenseValid ? "true" : "false");
+    queueJson(seq, out);
+    return;
+  }
+
+  if (hasText(json, "\"cmd\":\"license_status\"")) {
+    char out[120];
+    snprintf(out, sizeof(out), "{\"seq\":%u,\"ok\":true,\"licensed\":%s}", seq, licenseValid ? "true" : "false");
+    queueJson(seq, out);
+    return;
+  }
+
+  if (hasText(json, "\"cmd\":\"device_info\"")) {
+    char passcode[32];
+    if (!extractJsonString(json, "\"passcode\"", passcode, sizeof(passcode)) || strcmp(passcode, DEVICE_INFO_PASSCODE) != 0) {
+      char out[120];
+      snprintf(out, sizeof(out), "{\"seq\":%u,\"ok\":false,\"err\":\"bad_passcode\"}", seq);
+      queueJson(seq, out);
+      return;
+    }
+
+    char uid[25];
+    uidHex(uid, sizeof(uid));
+    char out[180];
+    snprintf(out, sizeof(out), "{\"seq\":%u,\"ok\":true,\"uid\":\"%s\",\"licensed\":%s}", seq, uid, licenseValid ? "true" : "false");
+    queueJson(seq, out);
+    return;
+  }
+
+  if (hasText(json, "\"cmd\":\"activate\"")) {
+    char token[65];
+    char expected[65];
+    extractJsonString(json, "\"token\"", token, sizeof(token));
+    makeExpectedToken(expected, sizeof(expected));
+
+    if (strcmp(token, expected) != 0) {
+      char out[120];
+      snprintf(out, sizeof(out), "{\"seq\":%u,\"ok\":false,\"err\":\"invalid_token\"}", seq);
+      queueJson(seq, out);
+      return;
+    }
+
+    const bool saved = saveLicenseToken(token);
+    char out[140];
+    snprintf(out, sizeof(out), "{\"seq\":%u,\"ok\":%s,\"activated\":%s}", seq, saved ? "true" : "false", saved ? "true" : "false");
+    queueJson(seq, out);
+    return;
+  }
+
+  if (!licenseValid) {
+    char out[140];
+    snprintf(out, sizeof(out), "{\"seq\":%u,\"ok\":false,\"err\":\"license_required\"}", seq);
     queueJson(seq, out);
     return;
   }

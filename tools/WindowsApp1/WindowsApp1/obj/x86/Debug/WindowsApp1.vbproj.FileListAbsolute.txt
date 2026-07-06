@@ -1,0 +1,14 @@
+C:\Users\HP\source\repos\WindowsApp1\WindowsApp1\bin\x86\Debug\WindowsApp1.exe.config
+C:\Users\HP\source\repos\WindowsApp1\WindowsApp1\bin\x86\Debug\WindowsApp1.exe
+C:\Users\HP\source\repos\WindowsApp1\WindowsApp1\bin\x86\Debug\WindowsApp1.pdb
+C:\Users\HP\source\repos\WindowsApp1\WindowsApp1\bin\x86\Debug\WindowsApp1.xml
+C:\Users\HP\source\repos\WindowsApp1\WindowsApp1\obj\x86\Debug\WindowsApp1.vbproj.AssemblyReference.cache
+C:\Users\HP\source\repos\WindowsApp1\WindowsApp1\obj\x86\Debug\WindowsApp1.Resources.resources
+C:\Users\HP\source\repos\WindowsApp1\WindowsApp1\obj\x86\Debug\WindowsApp1.vbproj.GenerateResource.cache
+C:\Users\HP\source\repos\WindowsApp1\WindowsApp1\obj\x86\Debug\WindowsApp1.vbproj.CoreCompileInputs.cache
+C:\Users\HP\source\repos\WindowsApp1\WindowsApp1\obj\x86\Debug\WindowsApp1.exe
+C:\Users\HP\source\repos\WindowsApp1\WindowsApp1\obj\x86\Debug\WindowsApp1.xml
+C:\Users\HP\source\repos\WindowsApp1\WindowsApp1\obj\x86\Debug\WindowsApp1.pdb
+C:\Users\HP\source\repos\WindowsApp1\WindowsApp1\obj\x86\Debug\WindowsApp1.exe.config
+C:\Users\HP\source\repos\WindowsApp1\WindowsApp1\obj\x86\Debug\WindowsApp1.Form1.resources
+C:\Users\HP\source\repos\WindowsApp1\WindowsApp1\bin\x86\Debug\cbs64.dll

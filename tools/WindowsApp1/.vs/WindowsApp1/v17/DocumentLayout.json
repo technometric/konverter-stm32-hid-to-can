@@ -1,0 +1,86 @@
+{
+  "Version": 1,
+  "WorkspaceRootPath": "D:\\vs-projects\\cbs32-64-dll\\App\\WindowsApp1\\",
+  "Documents": [
+    {
+      "AbsoluteMoniker": "D:0:0:{DA56362F-49D4-4539-AC6F-CC1819438D4C}|WindowsApp1\\WindowsApp1.vbproj|D:\\vs-projects\\cbs32-64-dll\\App\\WindowsApp1\\windowsapp1\\form1.vb||{2C015C70-C72C-11D0-88C3-00A0C9110049}|Form",
+      "RelativeMoniker": "D:0:0:{DA56362F-49D4-4539-AC6F-CC1819438D4C}|WindowsApp1\\WindowsApp1.vbproj|solutionrelative:windowsapp1\\form1.vb||{2C015C70-C72C-11D0-88C3-00A0C9110049}|Form"
+    },
+    {
+      "AbsoluteMoniker": "D:0:0:{DA56362F-49D4-4539-AC6F-CC1819438D4C}|WindowsApp1\\WindowsApp1.vbproj|d:\\vs-projects\\cbs32-64-dll\\app\\windowsapp1\\windowsapp1\\form1.vb||{2C015C70-C72C-11D0-88C3-00A0C9110049}",
+      "RelativeMoniker": "D:0:0:{DA56362F-49D4-4539-AC6F-CC1819438D4C}|WindowsApp1\\WindowsApp1.vbproj|solutionrelative:windowsapp1\\form1.vb||{2C015C70-C72C-11D0-88C3-00A0C9110049}"
+    },
+    {
+      "AbsoluteMoniker": "D:0:0:{DA56362F-49D4-4539-AC6F-CC1819438D4C}|WindowsApp1\\WindowsApp1.vbproj|D:\\vs-projects\\cbs32-64-dll\\App\\WindowsApp1\\windowsapp1\\serialapi.vb||{2C015C70-C72C-11D0-88C3-00A0C9110049}",
+      "RelativeMoniker": "D:0:0:{DA56362F-49D4-4539-AC6F-CC1819438D4C}|WindowsApp1\\WindowsApp1.vbproj|solutionrelative:windowsapp1\\serialapi.vb||{2C015C70-C72C-11D0-88C3-00A0C9110049}"
+    },
+    {
+      "AbsoluteMoniker": "D:0:0:{DA56362F-49D4-4539-AC6F-CC1819438D4C}|WindowsApp1\\WindowsApp1.vbproj|D:\\vs-projects\\cbs32-64-dll\\App\\WindowsApp1\\windowsapp1\\form1.designer.vb||{2C015C70-C72C-11D0-88C3-00A0C9110049}",
+      "RelativeMoniker": "D:0:0:{DA56362F-49D4-4539-AC6F-CC1819438D4C}|WindowsApp1\\WindowsApp1.vbproj|solutionrelative:windowsapp1\\form1.designer.vb||{2C015C70-C72C-11D0-88C3-00A0C9110049}"
+    }
+  ],
+  "DocumentGroupContainers": [
+    {
+      "Orientation": 0,
+      "VerticalTabListWidth": 256,
+      "DocumentGroups": [
+        {
+          "DockedWidth": 200,
+          "SelectedChildIndex": 3,
+          "Children": [
+            {
+              "$type": "Document",
+              "DocumentIndex": 3,
+              "Title": "Form1.Designer.vb",
+              "DocumentMoniker": "D:\\vs-projects\\cbs32-64-dll\\App\\WindowsApp1\\WindowsApp1\\Form1.Designer.vb",
+              "RelativeDocumentMoniker": "WindowsApp1\\Form1.Designer.vb",
+              "ToolTip": "D:\\vs-projects\\cbs32-64-dll\\App\\WindowsApp1\\WindowsApp1\\Form1.Designer.vb",
+              "RelativeToolTip": "WindowsApp1\\Form1.Designer.vb",
+              "ViewState": "AgIAACIBAAAAAAAAAAAswDEBAAAWAAAAAAAAAA==",
+              "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.003361|",
+              "WhenOpened": "2025-11-09T09:56:21.228Z",
+              "EditorCaption": ""
+            },
+            {
+              "$type": "Document",
+              "DocumentIndex": 2,
+              "Title": "SerialAPI.vb",
+              "DocumentMoniker": "D:\\vs-projects\\cbs32-64-dll\\App\\WindowsApp1\\WindowsApp1\\SerialAPI.vb",
+              "RelativeDocumentMoniker": "WindowsApp1\\SerialAPI.vb",
+              "ToolTip": "D:\\vs-projects\\cbs32-64-dll\\App\\WindowsApp1\\WindowsApp1\\SerialAPI.vb*",
+              "RelativeToolTip": "WindowsApp1\\SerialAPI.vb*",
+              "ViewState": "AgIAAHMAAAAAAAAAAAAiwIUAAAAAAAAAAAAAAA==",
+              "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.003361|",
+              "WhenOpened": "2025-10-11T16:56:12.518Z"
+            },
+            {
+              "$type": "Document",
+              "DocumentIndex": 1,
+              "Title": "Form1.vb",
+              "DocumentMoniker": "D:\\vs-projects\\cbs32-64-dll\\App\\WindowsApp1\\WindowsApp1\\Form1.vb",
+              "RelativeDocumentMoniker": "WindowsApp1\\Form1.vb",
+              "ToolTip": "D:\\vs-projects\\cbs32-64-dll\\App\\WindowsApp1\\WindowsApp1\\Form1.vb",
+              "RelativeToolTip": "WindowsApp1\\Form1.vb",
+              "ViewState": "AgIAAKYAAAAAAAAAAAD4v5cAAAAIAAAAAAAAAA==",
+              "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.003361|",
+              "WhenOpened": "2025-10-11T16:37:46.26Z",
+              "EditorCaption": ""
+            },
+            {
+              "$type": "Document",
+              "DocumentIndex": 0,
+              "Title": "Form1.vb [Design]",
+              "DocumentMoniker": "D:\\vs-projects\\cbs32-64-dll\\App\\WindowsApp1\\WindowsApp1\\Form1.vb",
+              "RelativeDocumentMoniker": "WindowsApp1\\Form1.vb",
+              "ToolTip": "D:\\vs-projects\\cbs32-64-dll\\App\\WindowsApp1\\WindowsApp1\\Form1.vb [Design]",
+              "RelativeToolTip": "WindowsApp1\\Form1.vb [Design]",
+              "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.003361|",
+              "WhenOpened": "2025-10-11T16:31:16.273Z",
+              "EditorCaption": " [Design]"
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}
